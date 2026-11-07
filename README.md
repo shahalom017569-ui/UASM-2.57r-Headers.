@@ -36,5 +36,6 @@ defaults to x86. `WINDOWS_AUTOLIB EQU 1` emits import-library directives.
 
 - `math_vectors.asm`
 - `transform_pipeline.asm`
+- `camera_pipeline.asm` — composes model, view, and perspective matrices and transforms a point to NDC.
 - `messagebox.asm`
 - `window.asm`
