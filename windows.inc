@@ -7,8 +7,19 @@
 ;   x64: define WINDOWS_X64 before including this file, or assemble with
 ;        _WIN64 already defined.
 ;
-; API prototypes are declarations only. Link the corresponding Windows import
-; libraries (commonly kernel32.lib and user32.lib).
+; Import/link conventions:
+;   PROTO declarations below allow INVOKE and provide external procedure
+;   declarations. Link the matching import libraries in the linker command,
+;   or define WINDOWS_AUTOLIB before INCLUDE to emit MASM/UASM INCLUDELIB
+;   directives for the libraries used by this file.
+;   Example: WINDOWS_AUTOLIB EQU 1
+;            INCLUDE windows.inc
+;   Alternatively, write INCLUDELIB kernel32.lib etc. in the source.
+;   Do not add a second EXTERN declaration for a function already declared
+;   with PROTO. For manual CALL use, the PROTO supplies the external symbol.
+;
+; The A/W declarations select ANSI or UTF-16 APIs explicitly. This header
+; intentionally omits the large SDK macro layer and complete structure set.
 
 IFNDEF WINDOWS_INC_INCLUDED
 WINDOWS_INC_INCLUDED EQU 1
@@ -45,6 +56,7 @@ USHORT     TEXTEQU <WORD>
 CHAR       TEXTEQU <BYTE>
 WCHAR      TEXTEQU <WORD>
 FLOAT_T    TEXTEQU <REAL4>
+COLORREF   TEXTEQU <DWORD>
 
 HANDLE     TEXTEQU <WIN_PTR>
 HWND       TEXTEQU <WIN_PTR>
@@ -59,6 +71,8 @@ HMODULE    TEXTEQU <WIN_PTR>
 HKEY       TEXTEQU <WIN_PTR>
 HGLOBAL    TEXTEQU <WIN_PTR>
 HLOCAL     TEXTEQU <WIN_PTR>
+HGDIOBJ    TEXTEQU <WIN_PTR>
+HPEN       TEXTEQU <WIN_PTR>
 FARPROC    TEXTEQU <WIN_PTR>
 LPVOID     TEXTEQU <WIN_PTR>
 LPCVOID    TEXTEQU <WIN_PTR>
@@ -151,6 +165,28 @@ INFINITE            EQU 0FFFFFFFFh
 WAIT_OBJECT_0       EQU 0
 WAIT_TIMEOUT        EQU 00000102h
 WAIT_FAILED         EQU 0FFFFFFFFh
+
+; GDI drawing constants.
+PS_SOLID            EQU 0
+TRANSPARENT         EQU 1
+OPAQUE              EQU 2
+SRCCOPY             EQU 00CC0020h
+
+; Registry constants (Advapi32).
+HKEY_CLASSES_ROOT   EQU 80000000h
+HKEY_CURRENT_USER   EQU 80000001h
+HKEY_LOCAL_MACHINE  EQU 80000002h
+HKEY_USERS          EQU 80000003h
+KEY_QUERY_VALUE     EQU 00000001h
+KEY_SET_VALUE       EQU 00000002h
+KEY_READ            EQU 00020019h
+KEY_WRITE           EQU 00020006h
+REG_NONE            EQU 0
+REG_SZ              EQU 1
+REG_EXPAND_SZ       EQU 2
+REG_BINARY          EQU 3
+REG_DWORD           EQU 4
+REG_QWORD           EQU 11
 
 ; Basic, architecture-independent structures.
 POINT STRUCT
@@ -255,6 +291,15 @@ ELSE
     WINAPI TEXTEQU <>
 ENDIF
 
+; Optional auto-link. Otherwise add the needed INCLUDELIB directives yourself.
+IFDEF WINDOWS_AUTOLIB
+    INCLUDELIB kernel32.lib
+    INCLUDELIB user32.lib
+    INCLUDELIB gdi32.lib
+    INCLUDELIB advapi32.lib
+    INCLUDELIB shell32.lib
+ENDIF
+
 ; Kernel32: modules, process/thread control, memory, files, console, time.
 GetModuleHandleA       PROTO WINAPI :LPCSTR
 GetModuleHandleW       PROTO WINAPI :LPCWSTR
@@ -307,5 +352,45 @@ GetMessageA            PROTO WINAPI :PTR MSG, :HWND, :UINT, :UINT
 TranslateMessage       PROTO WINAPI :PTR MSG
 DispatchMessageA       PROTO WINAPI :PTR MSG
 PostQuitMessage        PROTO WINAPI :INT
+
+; GDI32: device contexts, simple shapes, text, and bitmap blits.
+GetDC                  PROTO WINAPI :HWND
+ReleaseDC              PROTO WINAPI :HWND, :HDC
+CreatePen              PROTO WINAPI :INT, :INT, :COLORREF
+CreateSolidBrush       PROTO WINAPI :COLORREF
+SelectObject           PROTO WINAPI :HDC, :HGDIOBJ
+DeleteObject           PROTO WINAPI :HGDIOBJ
+Rectangle              PROTO WINAPI :HDC, :INT, :INT, :INT, :INT
+Ellipse                PROTO WINAPI :HDC, :INT, :INT, :INT, :INT
+MoveToEx               PROTO WINAPI :HDC, :INT, :INT, :PTR POINT
+LineTo                 PROTO WINAPI :HDC, :INT, :INT
+SetTextColor           PROTO WINAPI :HDC, :COLORREF
+SetBkColor             PROTO WINAPI :HDC, :COLORREF
+SetBkMode              PROTO WINAPI :HDC, :INT
+TextOutA               PROTO WINAPI :HDC, :INT, :INT, :LPCSTR, :INT
+TextOutW               PROTO WINAPI :HDC, :INT, :INT, :LPCWSTR, :INT
+BitBlt                 PROTO WINAPI :HDC, :INT, :INT, :INT, :INT, :HDC, :INT, :INT, :DWORD
+
+; Advapi32: common registry operations. Output parameters are caller-owned.
+RegOpenKeyExA          PROTO WINAPI :HKEY, :LPCSTR, :DWORD, :DWORD, :PTR HKEY
+RegOpenKeyExW          PROTO WINAPI :HKEY, :LPCWSTR, :DWORD, :DWORD, :PTR HKEY
+RegCreateKeyExA        PROTO WINAPI :HKEY, :LPCSTR, :DWORD, :LPSTR, :DWORD, :DWORD, :PTR SECURITY_ATTRIBUTES, :PTR HKEY, :PTR DWORD
+RegCreateKeyExW        PROTO WINAPI :HKEY, :LPCWSTR, :DWORD, :LPWSTR, :DWORD, :DWORD, :PTR SECURITY_ATTRIBUTES, :PTR HKEY, :PTR DWORD
+RegQueryValueExA       PROTO WINAPI :HKEY, :LPCSTR, :PTR DWORD, :PTR DWORD, :LPVOID, :PTR DWORD
+RegQueryValueExW       PROTO WINAPI :HKEY, :LPCWSTR, :PTR DWORD, :PTR DWORD, :LPVOID, :PTR DWORD
+RegSetValueExA         PROTO WINAPI :HKEY, :LPCSTR, :DWORD, :DWORD, :LPCVOID, :DWORD
+RegSetValueExW         PROTO WINAPI :HKEY, :LPCWSTR, :DWORD, :DWORD, :LPCVOID, :DWORD
+RegDeleteValueA        PROTO WINAPI :HKEY, :LPCSTR
+RegDeleteValueW        PROTO WINAPI :HKEY, :LPCWSTR
+RegCloseKey            PROTO WINAPI :HKEY
+
+; Shell32: launching a document/application and retrieving a known CSIDL path.
+; For ShellExecute, a return value greater than 32 indicates success.
+SEE_MASK_NOCLOSEPROCESS EQU 00000040h
+SW_SHOWNORMAL_SHELL     EQU 1
+ShellExecuteA          PROTO WINAPI :HWND, :LPCSTR, :LPCSTR, :LPCSTR, :LPCSTR, :INT
+ShellExecuteW          PROTO WINAPI :HWND, :LPCWSTR, :LPCWSTR, :LPCWSTR, :LPCWSTR, :INT
+SHGetFolderPathA       PROTO WINAPI :HWND, :INT, :HANDLE, :DWORD, :LPSTR
+SHGetFolderPathW       PROTO WINAPI :HWND, :INT, :HANDLE, :DWORD, :LPWSTR
 
 ENDIF ; WINDOWS_INC_INCLUDED
