@@ -1,39 +1,40 @@
-# UASM-2.57r-Headers.
+# UASM 2.57r Headers
 
-Headers for UASM 2.57r assembler.
+Compact, modular MASM-style include files and examples for UASM 2.57r.
 
-## Included modules
+## Math and geometry modules
 
-- `windows.inc` — compact Win32/Win64 declarations, structures, and APIs.
-- `math.inc` — integer arithmetic and scalar REAL4 helpers.
-- `float.inc` — scalar REAL4 arithmetic, clamp, compare, lerp, conversion, sine, and cosine macros.
-- `vector.inc` — `VEC2` and `VEC3` layouts plus common SSE vector operations.
-- `matrix.inc` — row-major 4x4 matrix helpers and matrix multiplication.
-- `transform.inc` — 2D affine and 3D homogeneous transform macros.
-- `statistics.inc` — mean, variance, stddev, min/max, and interpolation helpers.
-- `complex.inc` — complex-number arithmetic and magnitude macros.
+- `math.inc` — inline signed integer and scalar helpers.
+- `float.inc` — scalar REAL4 arithmetic, conversions, comparisons, and trigonometry.
+- `vector.inc` — VEC2/VEC3 layouts and common SSE vector operations.
+- `matrix.inc` — row-major 4x4 matrices and multiplication.
+- `transform.inc` — 2D affine and 3D homogeneous transform helpers.
+- `statistics.inc` — basic statistical helpers.
+- `complex.inc` — complex arithmetic and magnitude.
+- `quaternion.inc` — quaternion identity, conjugate, multiplication, normalization, and matrix conversion.
+- `camera.inc` — right-handed view plus perspective and orthographic projection matrices.
 
-## Design goals
+These are assembler include files with inline macros, not a complete SDK or a
+substitute for a tested numerical library. Review each module's comments for
+register usage, input assumptions, alias restrictions, and matrix conventions.
 
-The library is intentionally modular:
+## Matrix and coordinate conventions
 
-- small files with focused responsibilities
-- macros that map directly to instructions
-- no hidden runtime dependencies
-- straightforward extension for scientific, numerical, and graphics work
+Matrices are row-major in memory and multiply column vectors: `result = M * v`.
+The camera helpers use a right-handed view looking down -Z and OpenGL-style NDC
+Z in [-1,1]. Perspective parameters use precomputed x/y scales; the caller is
+responsible for computing `cot(fovY/2)` and any sine/cosine values.
 
-## Notes
+## Windows API include
 
-- SSE is required for all vector/REAL4 macros on x86 targets.
-- Windows x64 already has SSE2 and is the recommended path for floating-point work.
-- Trig helpers are direct asm macros; use caller-side angle reduction when needed.
-- Matrix conventions are documented in each file, especially the row-major and column-vector behavior.
+`windows.inc` contains selected Win32/Win64 types, constants, structures, and
+prototypes for Kernel32, User32, GDI32, Advapi32, and Shell32. Set
+`WINDOWS_X64 EQU 1` before including it for a 64-bit target; otherwise it
+defaults to x86. `WINDOWS_AUTOLIB EQU 1` emits import-library directives.
 
-## Example programs
+## Examples
 
-- `messagebox.asm`
-- `window.asm`
 - `math_vectors.asm`
 - `transform_pipeline.asm`
-
-These files illustrate the progression from basic Windows calls to scientific and graphics-style math use.
+- `messagebox.asm`
+- `window.asm`

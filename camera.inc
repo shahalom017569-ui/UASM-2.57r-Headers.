@@ -1,130 +1,162 @@
-; quaternion.inc - single-precision quaternion helpers for UASM 2.57r
-; Quaternions are stored as [x, y, z, w]. This file is built on top of
-; float.inc and vector.inc and uses SSE. It provides basic composition,
-; normalization, and rotation-vector conversion helpers.
+; camera.inc - view and projection matrices for a right-handed 3D camera
+; Requires MAT4 from matrix.inc. Matrix layout is row-major and vectors are
+; columns: clip = projection * view * position. Camera looks down -Z.
+;
+; CAMERA_VIEW_BASIS takes orthonormal right/up/backward vectors and eye position
+; (each VEC3 base register); rows become right, up, backward, with translation
+; -dot(axis, eye). For a conventional look-at camera, backward = normalize(eye-target),
+; right = normalize(cross(upHint, backward)), up = cross(backward, right).
+;
+; Projection helpers take precomputed scalar parameters to avoid hidden trig:
+; CAMERA_PERSPECTIVE takes xScale=cot(fovY/2)/aspect and yScale=cot(fovY/2),
+; plus positive near/far distances. It emits an OpenGL-style NDC depth range [-1,1].
+; CAMERA_ORTHO takes left/right/bottom/top and positive near/far distances,
+; also using OpenGL-style NDC depth [-1,1]. Inputs must be valid/non-degenerate.
 
-INCLUDE float.inc
+INCLUDE matrix.inc
 INCLUDE vector.inc
 
-IFNDEF UASM_QUATERNION_INC_INCLUDED
-UASM_QUATERNION_INC_INCLUDED EQU 1
+IFNDEF UASM_CAMERA_INC_INCLUDED
+UASM_CAMERA_INC_INCLUDED EQU 1
 
-QUAT STRUCT
-    x REAL4 ?
-    y REAL4 ?
-    z REAL4 ?
-    w REAL4 ?
-QUAT ENDS
-
-; q = [x, y, z, w]
-; q * q2 = quat_mul(q, q2)
-Q_MUL MACRO dst, q1, q2
-    ; temp = q1 * q2, where formula: 
-    ; (x1 y2 + y1 x2 + z1 w2 - w1 z2, ... )
-    ; we compute directly for each component.
-    movss xmm0, DWORD PTR [q1+0]
-    movss xmm1, DWORD PTR [q2+0]
-    movss xmm2, DWORD PTR [q1+4]
-    movss xmm3, DWORD PTR [q2+4]
-    ; x = x1*w2 + w1*x2 + y1*z2 - z1*y2
-    movss xmm4, DWORD PTR [q1+12]
-    movss xmm5, DWORD PTR [q2+12]
-    mulss xmm0, xmm5
-    mulss xmm4, xmm1
-    addss xmm0, xmm4
-    movss xmm4, DWORD PTR [q1+4]
-    mulss xmm4, DWORD PTR [q2+8]
-    addss xmm0, xmm4
-    movss xmm4, DWORD PTR [q1+8]
-    mulss xmm4, DWORD PTR [q2+4]
-    subss xmm0, xmm4
+; Build a right-handed view matrix from already normalized orthogonal basis axes.
+; dst, right, up, backward, eye are base registers. Clobbers XMM0-XMM2.
+CAMERA_VIEW_BASIS MACRO dst, right, up, backward, eye
+    MAT4_IDENTITY dst
+    movss xmm0, DWORD PTR [right+0]
     movss DWORD PTR [dst+0], xmm0
-
-    ; y = y1*w2 + w1*y2 + z1*x2 - x1*z2
-    movss xmm0, DWORD PTR [q1+4]
-    mulss xmm0, xmm5
-    movss xmm1, DWORD PTR [q1+12]
-    mulss xmm1, DWORD PTR [q2+4]
-    addss xmm0, xmm1
-    movss xmm1, DWORD PTR [q1+8]
-    mulss xmm1, DWORD PTR [q2+0]
-    addss xmm0, xmm1
-    movss xmm1, DWORD PTR [q1+0]
-    mulss xmm1, DWORD PTR [q2+8]
-    subss xmm0, xmm1
+    movss xmm0, DWORD PTR [right+4]
     movss DWORD PTR [dst+4], xmm0
-
-    ; z = z1*w2 + w1*z2 + x1*y2 - y1*x2
-    movss xmm0, DWORD PTR [q1+8]
-    mulss xmm0, xmm5
-    movss xmm1, DWORD PTR [q1+12]
-    mulss xmm1, DWORD PTR [q2+8]
-    addss xmm0, xmm1
-    movss xmm1, DWORD PTR [q1+0]
-    mulss xmm1, DWORD PTR [q2+4]
-    addss xmm0, xmm1
-    movss xmm1, DWORD PTR [q1+4]
-    mulss xmm1, DWORD PTR [q2+0]
-    subss xmm0, xmm1
+    movss xmm0, DWORD PTR [right+8]
     movss DWORD PTR [dst+8], xmm0
-
-    ; w = w1*w2 - x1*x2 - y1*y2 - z1*z2
-    movss xmm0, DWORD PTR [q1+12]
-    mulss xmm0, DWORD PTR [q2+12]
-    movss xmm1, DWORD PTR [q1+0]
-    mulss xmm1, DWORD PTR [q2+0]
-    subss xmm0, xmm1
-    movss xmm1, DWORD PTR [q1+4]
-    mulss xmm1, DWORD PTR [q2+4]
-    subss xmm0, xmm1
-    movss xmm1, DWORD PTR [q1+8]
-    mulss xmm1, DWORD PTR [q2+8]
-    subss xmm0, xmm1
-    movss DWORD PTR [dst+12], xmm0
+    movss xmm0, DWORD PTR [up+0]
+    movss DWORD PTR [dst+16], xmm0
+    movss xmm0, DWORD PTR [up+4]
+    movss DWORD PTR [dst+20], xmm0
+    movss xmm0, DWORD PTR [up+8]
+    movss DWORD PTR [dst+24], xmm0
+    movss xmm0, DWORD PTR [backward+0]
+    movss DWORD PTR [dst+32], xmm0
+    movss xmm0, DWORD PTR [backward+4]
+    movss DWORD PTR [dst+36], xmm0
+    movss xmm0, DWORD PTR [backward+8]
+    movss DWORD PTR [dst+40], xmm0
+    ; Translation components: -dot(axis, eye).
+    movss xmm0, DWORD PTR [right+0]
+    mulss xmm0, DWORD PTR [eye+0]
+    movss xmm1, DWORD PTR [right+4]
+    mulss xmm1, DWORD PTR [eye+4]
+    addss xmm0, xmm1
+    movss xmm1, DWORD PTR [right+8]
+    mulss xmm1, DWORD PTR [eye+8]
+    addss xmm0, xmm1
+    xor eax, eax
+    movd xmm1, eax
+    subss xmm1, xmm0
+    movss DWORD PTR [dst+12], xmm1
+    movss xmm0, DWORD PTR [up+0]
+    mulss xmm0, DWORD PTR [eye+0]
+    movss xmm1, DWORD PTR [up+4]
+    mulss xmm1, DWORD PTR [eye+4]
+    addss xmm0, xmm1
+    movss xmm1, DWORD PTR [up+8]
+    mulss xmm1, DWORD PTR [eye+8]
+    addss xmm0, xmm1
+    xor eax, eax
+    movd xmm1, eax
+    subss xmm1, xmm0
+    movss DWORD PTR [dst+28], xmm1
+    movss xmm0, DWORD PTR [backward+0]
+    mulss xmm0, DWORD PTR [eye+0]
+    movss xmm1, DWORD PTR [backward+4]
+    mulss xmm1, DWORD PTR [eye+4]
+    addss xmm0, xmm1
+    movss xmm1, DWORD PTR [backward+8]
+    mulss xmm1, DWORD PTR [eye+8]
+    addss xmm0, xmm1
+    xor eax, eax
+    movd xmm1, eax
+    subss xmm1, xmm0
+    movss DWORD PTR [dst+44], xmm1
 ENDM
 
-; q = normalize(q)
-Q_NORMALIZE MACRO dst, src
-    LOCAL oneOverLen
-    DATASEG
-    oneOverLen REAL4 0.0
-    CODESEG
-    movss xmm0, DWORD PTR [src+0]
-    mulss xmm0, xmm0
-    movss xmm1, DWORD PTR [src+4]
-    mulss xmm1, xmm1
-    addss xmm0, xmm1
-    movss xmm1, DWORD PTR [src+8]
-    mulss xmm1, xmm1
-    addss xmm0, xmm1
-    movss xmm1, DWORD PTR [src+12]
-    mulss xmm1, xmm1
-    addss xmm0, xmm1
-    sqrtss xmm0, xmm0
-    movss oneOverLen, xmm0
-    movss xmm1, oneOverLen
-    xorpd xmm2, xmm2
-    movss xmm2, DWORD PTR [src+0]
-    divss xmm2, xmm1
-    movss DWORD PTR [dst+0], xmm2
-    movss xmm2, DWORD PTR [src+4]
-    divss xmm2, xmm1
-    movss DWORD PTR [dst+4], xmm2
-    movss xmm2, DWORD PTR [src+8]
-    divss xmm2, xmm1
-    movss DWORD PTR [dst+8], xmm2
-    movss xmm2, DWORD PTR [src+12]
-    divss xmm2, xmm1
-    movss DWORD PTR [dst+12], xmm2
+; Perspective projection: xScale and yScale supplied by caller, see header.
+CAMERA_PERSPECTIVE MACRO dst, xScale, yScale, nearZ, farZ
+    MAT4_ZERO dst
+    movss xmm0, xScale
+    movss DWORD PTR [dst+0], xmm0
+    movss xmm0, yScale
+    movss DWORD PTR [dst+20], xmm0
+    ; m22 = -(far + near) / (far - near)
+    movss xmm0, farZ
+    addss xmm0, nearZ
+    movss xmm1, farZ
+    subss xmm1, nearZ
+    divss xmm0, xmm1
+    movd eax, xmm0
+    xor eax, 080000000h
+    movd xmm0, eax
+    movss DWORD PTR [dst+40], xmm0
+    ; m23 = -(2 * far * near) / (far - near)
+    movss xmm0, farZ
+    mulss xmm0, nearZ
+    addss xmm0, xmm0
+    divss xmm0, xmm1
+    movd eax, xmm0
+    xor eax, 080000000h
+    movd xmm0, eax
+    movss DWORD PTR [dst+44], xmm0
+    ; m32 = -1
+    mov DWORD PTR [dst+56], 0BF800000h
 ENDM
 
-; Convert axis-angle vector to quaternion.
-; input axis = [ax, ay, az], angle = radian angle in memory scalar.
-Q_FROM_AXIS_ANGLE MACRO dst, axis, angle
-    ; q = [sin(angle/2)*axis, cos(angle/2)]
-    movss xmm0, angle
-    mulss xmm0, HALF_F32
-    sincos??
+; Orthographic projection, right-handed with OpenGL-style NDC depth [-1,1].
+CAMERA_ORTHO MACRO dst, left, right, bottom, top, nearZ, farZ
+    MAT4_IDENTITY dst
+    ; m00 = 2/(right-left), m03 = -(right+left)/(right-left)
+    movss xmm0, right
+    subss xmm0, left
+    movss xmm1, TWO_F32
+    divss xmm1, xmm0
+    movss DWORD PTR [dst+0], xmm1
+    movss xmm1, right
+    addss xmm1, left
+    divss xmm1, xmm0
+    movd eax, xmm1
+    xor eax, 080000000h
+    movd xmm1, eax
+    movss DWORD PTR [dst+12], xmm1
+    ; m11 = 2/(top-bottom), m13 = -(top+bottom)/(top-bottom)
+    movss xmm0, top
+    subss xmm0, bottom
+    movss xmm1, TWO_F32
+    divss xmm1, xmm0
+    movss DWORD PTR [dst+20], xmm1
+    movss xmm1, top
+    addss xmm1, bottom
+    divss xmm1, xmm0
+    movd eax, xmm1
+    xor eax, 080000000h
+    movd xmm1, eax
+    movss DWORD PTR [dst+28], xmm1
+    ; m22 = -2/(far-near), m23 = -(far+near)/(far-near)
+    movss xmm0, farZ
+    subss xmm0, nearZ
+    movss xmm1, TWO_F32
+    divss xmm1, xmm0
+    movd eax, xmm1
+    xor eax, 080000000h
+    movd xmm1, eax
+    movss DWORD PTR [dst+40], xmm1
+    movss xmm1, farZ
+    addss xmm1, nearZ
+    divss xmm1, xmm0
+    movd eax, xmm1
+    xor eax, 080000000h
+    movd xmm1, eax
+    movss DWORD PTR [dst+44], xmm1
 ENDM
 
-ENDIF ; UASM_QUATERNION_INC_INCLUDED
+TWO_F32 REAL4 2.0
+
+ENDIF ; UASM_CAMERA_INC_INCLUDED
