@@ -1,26 +1,23 @@
-; camera.inc - view and projection matrices for a right-handed 3D camera
-; Requires MAT4 from matrix.inc. Matrix layout is row-major and vectors are
-; columns: clip = projection * view * position. Camera looks down -Z.
+; camera.inc - right-handed camera view/projection helpers for UASM 2.57r
+; Depends on MAT4 from matrix.inc and VEC3 from vector.inc.
 ;
-; CAMERA_VIEW_BASIS takes orthonormal right/up/backward vectors and eye position
-; (each VEC3 base register); rows become right, up, backward, with translation
-; -dot(axis, eye). For a conventional look-at camera, backward = normalize(eye-target),
-; right = normalize(cross(upHint, backward)), up = cross(backward, right).
+; Matrices are row-major and multiply column vectors. Camera space looks down
+; -Z. Projection follows OpenGL NDC depth [-1,+1]. Parameters are REAL4 memory
+; operands; dst/axis/eye arguments are base registers.
 ;
-; Projection helpers take precomputed scalar parameters to avoid hidden trig:
-; CAMERA_PERSPECTIVE takes xScale=cot(fovY/2)/aspect and yScale=cot(fovY/2),
-; plus positive near/far distances. It emits an OpenGL-style NDC depth range [-1,1].
-; CAMERA_ORTHO takes left/right/bottom/top and positive near/far distances,
-; also using OpenGL-style NDC depth [-1,1]. Inputs must be valid/non-degenerate.
+; CAMERA_VIEW_BASIS expects orthonormal right/up/backward axes and eye position.
+; It builds the view matrix rows from those axes and translation -dot(axis,eye).
+; CAMERA_PERSPECTIVE expects xScale=cot(fovY/2)/aspect and
+; yScale=cot(fovY/2), plus positive near/far distances (far > near > 0).
+; CAMERA_ORTHO expects valid left/right, bottom/top, and positive near/far.
+; These routines use SSE2 and clobber XMM0-XMM2 and EAX.
 
-INCLUDE matrix.inc
 INCLUDE vector.inc
+INCLUDE matrix.inc
 
 IFNDEF UASM_CAMERA_INC_INCLUDED
 UASM_CAMERA_INC_INCLUDED EQU 1
 
-; Build a right-handed view matrix from already normalized orthogonal basis axes.
-; dst, right, up, backward, eye are base registers. Clobbers XMM0-XMM2.
 CAMERA_VIEW_BASIS MACRO dst, right, up, backward, eye
     MAT4_IDENTITY dst
     movss xmm0, DWORD PTR [right+0]
@@ -29,19 +26,22 @@ CAMERA_VIEW_BASIS MACRO dst, right, up, backward, eye
     movss DWORD PTR [dst+4], xmm0
     movss xmm0, DWORD PTR [right+8]
     movss DWORD PTR [dst+8], xmm0
+
     movss xmm0, DWORD PTR [up+0]
     movss DWORD PTR [dst+16], xmm0
     movss xmm0, DWORD PTR [up+4]
     movss DWORD PTR [dst+20], xmm0
     movss xmm0, DWORD PTR [up+8]
     movss DWORD PTR [dst+24], xmm0
+
     movss xmm0, DWORD PTR [backward+0]
     movss DWORD PTR [dst+32], xmm0
     movss xmm0, DWORD PTR [backward+4]
     movss DWORD PTR [dst+36], xmm0
     movss xmm0, DWORD PTR [backward+8]
     movss DWORD PTR [dst+40], xmm0
-    ; Translation components: -dot(axis, eye).
+
+    ; m03 = -dot(right, eye)
     movss xmm0, DWORD PTR [right+0]
     mulss xmm0, DWORD PTR [eye+0]
     movss xmm1, DWORD PTR [right+4]
@@ -50,10 +50,12 @@ CAMERA_VIEW_BASIS MACRO dst, right, up, backward, eye
     movss xmm1, DWORD PTR [right+8]
     mulss xmm1, DWORD PTR [eye+8]
     addss xmm0, xmm1
-    xor eax, eax
-    movd xmm1, eax
-    subss xmm1, xmm0
-    movss DWORD PTR [dst+12], xmm1
+    movd eax, xmm0
+    xor eax, 080000000h
+    movd xmm0, eax
+    movss DWORD PTR [dst+12], xmm0
+
+    ; m13 = -dot(up, eye)
     movss xmm0, DWORD PTR [up+0]
     mulss xmm0, DWORD PTR [eye+0]
     movss xmm1, DWORD PTR [up+4]
@@ -62,10 +64,12 @@ CAMERA_VIEW_BASIS MACRO dst, right, up, backward, eye
     movss xmm1, DWORD PTR [up+8]
     mulss xmm1, DWORD PTR [eye+8]
     addss xmm0, xmm1
-    xor eax, eax
-    movd xmm1, eax
-    subss xmm1, xmm0
-    movss DWORD PTR [dst+28], xmm1
+    movd eax, xmm0
+    xor eax, 080000000h
+    movd xmm0, eax
+    movss DWORD PTR [dst+28], xmm0
+
+    ; m23 = -dot(backward, eye)
     movss xmm0, DWORD PTR [backward+0]
     mulss xmm0, DWORD PTR [eye+0]
     movss xmm1, DWORD PTR [backward+4]
@@ -74,19 +78,20 @@ CAMERA_VIEW_BASIS MACRO dst, right, up, backward, eye
     movss xmm1, DWORD PTR [backward+8]
     mulss xmm1, DWORD PTR [eye+8]
     addss xmm0, xmm1
-    xor eax, eax
-    movd xmm1, eax
-    subss xmm1, xmm0
-    movss DWORD PTR [dst+44], xmm1
+    movd eax, xmm0
+    xor eax, 080000000h
+    movd xmm0, eax
+    movss DWORD PTR [dst+44], xmm0
 ENDM
 
-; Perspective projection: xScale and yScale supplied by caller, see header.
+; Right-handed perspective matrix with OpenGL-style NDC z in [-1,+1].
 CAMERA_PERSPECTIVE MACRO dst, xScale, yScale, nearZ, farZ
     MAT4_ZERO dst
     movss xmm0, xScale
     movss DWORD PTR [dst+0], xmm0
     movss xmm0, yScale
     movss DWORD PTR [dst+20], xmm0
+
     ; m22 = -(far + near) / (far - near)
     movss xmm0, farZ
     addss xmm0, nearZ
@@ -97,6 +102,7 @@ CAMERA_PERSPECTIVE MACRO dst, xScale, yScale, nearZ, farZ
     xor eax, 080000000h
     movd xmm0, eax
     movss DWORD PTR [dst+40], xmm0
+
     ; m23 = -(2 * far * near) / (far - near)
     movss xmm0, farZ
     mulss xmm0, nearZ
@@ -106,13 +112,13 @@ CAMERA_PERSPECTIVE MACRO dst, xScale, yScale, nearZ, farZ
     xor eax, 080000000h
     movd xmm0, eax
     movss DWORD PTR [dst+44], xmm0
-    ; m32 = -1
-    mov DWORD PTR [dst+56], 0BF800000h
+    mov DWORD PTR [dst+56], 0BF800000h ; m32 = -1
 ENDM
 
-; Orthographic projection, right-handed with OpenGL-style NDC depth [-1,1].
+; Right-handed orthographic projection with OpenGL-style NDC z in [-1,+1].
 CAMERA_ORTHO MACRO dst, left, right, bottom, top, nearZ, farZ
     MAT4_IDENTITY dst
+
     ; m00 = 2/(right-left), m03 = -(right+left)/(right-left)
     movss xmm0, right
     subss xmm0, left
@@ -126,6 +132,7 @@ CAMERA_ORTHO MACRO dst, left, right, bottom, top, nearZ, farZ
     xor eax, 080000000h
     movd xmm1, eax
     movss DWORD PTR [dst+12], xmm1
+
     ; m11 = 2/(top-bottom), m13 = -(top+bottom)/(top-bottom)
     movss xmm0, top
     subss xmm0, bottom
@@ -139,6 +146,7 @@ CAMERA_ORTHO MACRO dst, left, right, bottom, top, nearZ, farZ
     xor eax, 080000000h
     movd xmm1, eax
     movss DWORD PTR [dst+28], xmm1
+
     ; m22 = -2/(far-near), m23 = -(far+near)/(far-near)
     movss xmm0, farZ
     subss xmm0, nearZ

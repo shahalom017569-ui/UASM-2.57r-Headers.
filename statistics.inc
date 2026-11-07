@@ -1,136 +1,121 @@
-; statistics.inc - compact real-valued aggregate helpers for UASM 2.57r
-; These macros operate on arrays of REAL4 values and store the result in a
-; REAL4 destination or memory object. They are intentionally lightweight and
-; avoid external dependency on Win32 or x64 intrinsics.
+; statistics.inc - basic REAL4 array statistics for UASM 2.57r
+; SSE2 inline macros; no external runtime dependencies.
 ;
-; Conventions:
-;   - ptr is a base pointer to an array of REAL4 elements.
-;   - count is an integer count in bytes/words if passed as an immediate.
-;   - result is a pointer to a REAL4 destination, not a register value.
-
-INCLUDE float.inc
+; ptr is a base register pointing to an array of REAL4 values. count must be a
+; nonnegative immediate or 32-bit register value. Destinations are REAL4 memory
+; operands. Empty arrays produce zero for all outputs. The macros clobber EAX,
+; ECX, and XMM0-XMM2. Arrays are read-only; results are stored in destinations.
 
 IFNDEF UASM_STATISTICS_INC_INCLUDED
 UASM_STATISTICS_INC_INCLUDED EQU 1
 
-; dst = sum(array[0..count-1])
+; dst = sum(values[0..count-1])
 STAT_SUM_REAL4 MACRO dst, ptr, count
-    LOCAL done, loop
+    LOCAL sum_loop, sum_done
     mov ecx, count
     xor eax, eax
-    fldz
+    xorps xmm0, xmm0
     test ecx, ecx
-    jz done
-loop:
-    fld DWORD PTR [ptr + eax*4]
-    faddp st(1), st(0)
-    inc eax
-    dec ecx
-    jnz loop
-    fstp DWORD PTR [dst]
-    jmp short done
-done:
-ENDM
-
-; dst = mean(array[0..count-1])
-STAT_MEAN_REAL4 MACRO dst, ptr, count
-    LOCAL done, sum_loop
-    mov ecx, count
-    xor eax, eax
-    fldz
-    test ecx, ecx
-    jz done
+    jz sum_done
 sum_loop:
-    fld DWORD PTR [ptr + eax*4]
-    faddp st(1), st(0)
+    addss xmm0, DWORD PTR [ptr+eax*4]
     inc eax
     dec ecx
     jnz sum_loop
-    ; divide by count using float conversion
-    fild DWORD PTR count
-    fdivp st(1), st(0)
-    fstp DWORD PTR [dst]
-    jmp short done
-done:
+sum_done:
+    movss DWORD PTR [dst], xmm0
 ENDM
 
-; dst = rms(array[0..count-1]) = sqrt(mean(x^2))
+; dst = arithmetic mean. Empty input yields 0.0.
+STAT_MEAN_REAL4 MACRO dst, ptr, count
+    LOCAL mean_loop, mean_done
+    mov ecx, count
+    xor eax, eax
+    xorps xmm0, xmm0
+    test ecx, ecx
+    jz mean_done
+mean_loop:
+    addss xmm0, DWORD PTR [ptr+eax*4]
+    inc eax
+    dec ecx
+    jnz mean_loop
+    cvtsi2ss xmm1, DWORD PTR [count]
+    divss xmm0, xmm1
+mean_done:
+    movss DWORD PTR [dst], xmm0
+ENDM
+
+; dst = sqrt(sum(x*x)/count). Empty input yields 0.0.
 STAT_RMS_REAL4 MACRO dst, ptr, count
-    LOCAL done, loop
+    LOCAL rms_loop, rms_done
     mov ecx, count
     xor eax, eax
-    fldz
+    xorps xmm0, xmm0
     test ecx, ecx
-    jz done
-loop:
-    fld DWORD PTR [ptr + eax*4]
-    fmul st(0), st(0)
-    faddp st(1), st(0)
+    jz rms_done
+rms_loop:
+    movss xmm1, DWORD PTR [ptr+eax*4]
+    mulss xmm1, xmm1
+    addss xmm0, xmm1
     inc eax
     dec ecx
-    jnz loop
-    ; divide by count
-    fild DWORD PTR count
-    fdivp st(1), st(0)
-    fsqrt
-    fstp DWORD PTR [dst]
-    jmp short done
-done:
+    jnz rms_loop
+    cvtsi2ss xmm1, DWORD PTR [count]
+    divss xmm0, xmm1
+    sqrtss xmm0, xmm0
+rms_done:
+    movss DWORD PTR [dst], xmm0
 ENDM
 
-; dstMin = minimum(array), dstMax = maximum(array)
+; Store min and max. Empty input yields 0.0 for both outputs.
 STAT_MIN_MAX_REAL4 MACRO dstMin, dstMax, ptr, count
-    LOCAL done, loop
+    LOCAL minmax_loop, minmax_done, minmax_empty
     mov ecx, count
     test ecx, ecx
-    jz done
+    jz minmax_empty
     xor eax, eax
-    fld DWORD PTR [ptr + eax*4]
-    mov DWORD PTR [dstMin], eax
-    mov DWORD PTR [dstMax], eax
-    ; Use a temporary register pair in memory. The minimum and maximum are held
-    ; in the x87 stack by comparing against each element.
+    movss xmm0, DWORD PTR [ptr]
+    movaps xmm1, xmm0
     inc eax
     dec ecx
-    jz done
-loop:
-    fld DWORD PTR [ptr + eax*4]
-    fld DWORD PTR [dstMin]
-    fcomip st(0), st(1)
-    ; If the new element is smaller, replace min.
-    ; For a simple implementation we keep the current min/max in stack after the
-    ; comparison and reload from memory; this keeps the code compact and readable.
-    ; The x87 comparison leaves the stack balanced by popping one register.
-    fstp st(0)
+    jz minmax_done
+minmax_loop:
+    movss xmm2, DWORD PTR [ptr+eax*4]
+    minss xmm0, xmm2
+    maxss xmm1, xmm2
     inc eax
     dec ecx
-    jnz loop
-done:
+    jnz minmax_loop
+    jmp minmax_done
+minmax_empty:
+    xorps xmm0, xmm0
+    xorps xmm1, xmm1
+minmax_done:
+    movss DWORD PTR [dstMin], xmm0
+    movss DWORD PTR [dstMax], xmm1
 ENDM
 
-; dst = variance(array[0..count-1]) around the mean
+; Population variance: sum((x-mean)^2)/count. meanPtr points to REAL4.
+; Empty input yields 0.0.
 STAT_VARIANCE_REAL4 MACRO dst, ptr, count, meanPtr
-    LOCAL done, loop
+    LOCAL variance_loop, variance_done
     mov ecx, count
     xor eax, eax
-    fldz
+    xorps xmm0, xmm0
     test ecx, ecx
-    jz done
-loop:
-    fld DWORD PTR [ptr + eax*4]
-    fld DWORD PTR [meanPtr]
-    fsubp st(1), st(0)
-    fmul st(0), st(0)
-    faddp st(1), st(0)
+    jz variance_done
+variance_loop:
+    movss xmm1, DWORD PTR [ptr+eax*4]
+    subss xmm1, DWORD PTR [meanPtr]
+    mulss xmm1, xmm1
+    addss xmm0, xmm1
     inc eax
     dec ecx
-    jnz loop
-    ; divide by count
-    fild DWORD PTR count
-    fdivp st(1), st(0)
-    fstp DWORD PTR [dst]
-    jmp short done
-done:
+    jnz variance_loop
+    cvtsi2ss xmm1, DWORD PTR [count]
+    divss xmm0, xmm1
+variance_done:
+    movss DWORD PTR [dst], xmm0
 ENDM
 
 ENDIF ; UASM_STATISTICS_INC_INCLUDED

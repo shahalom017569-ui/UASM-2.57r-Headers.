@@ -2,40 +2,38 @@
 
 Compact, modular MASM-style include files and examples for UASM 2.57r.
 
-## Math and geometry modules
+## Modules
 
-- `math.inc` — inline signed integer and scalar helpers.
-- `float.inc` — scalar REAL4 arithmetic, conversions, comparisons, and trigonometry.
-- `vector.inc` — VEC2/VEC3 layouts and common SSE vector operations.
+- `math.inc` — inline signed integer helpers and basic scalar REAL4 operations.
+- `float.inc` — scalar floating-point arithmetic, conversions, comparisons, and trigonometry.
+- `vector.inc` — VEC2/VEC3 layouts and vector operations.
 - `matrix.inc` — row-major 4x4 matrices and multiplication.
-- `transform.inc` — 2D affine and 3D homogeneous transform helpers.
-- `statistics.inc` — basic statistical helpers.
-- `complex.inc` — complex arithmetic and magnitude.
-- `quaternion.inc` — quaternion identity, conjugate, multiplication, normalization, and matrix conversion.
-- `camera.inc` — right-handed view plus perspective and orthographic projection matrices.
+- `transform.inc` — 2D affine and 3D homogeneous transforms.
+- `camera.inc` — right-handed view, perspective, and orthographic matrices.
+- `quaternion.inc` — quaternion multiplication, normalization, and matrix conversion.
+- `statistics.inc` — REAL4 array sum, mean, RMS, min/max, and population variance.
+- `complex.inc` — complex arithmetic helpers.
+- `windows.inc` — selected Win32/Win64 declarations and API prototypes.
 
-These are assembler include files with inline macros, not a complete SDK or a
-substitute for a tested numerical library. Review each module's comments for
-register usage, input assumptions, alias restrictions, and matrix conventions.
+## Math conventions and requirements
 
-## Matrix and coordinate conventions
+Matrices are row-major in memory and multiply column vectors (`result = M * v`).
+The camera helpers use a right-handed coordinate system looking down -Z and
+OpenGL-style NDC depth in [-1,+1]. The perspective helper takes precomputed
+x/y scale values; it does not calculate the field-of-view trigonometry.
 
-Matrices are row-major in memory and multiply column vectors: `result = M * v`.
-The camera helpers use a right-handed view looking down -Z and OpenGL-style NDC
-Z in [-1,1]. Perspective parameters use precomputed x/y scales; the caller is
-responsible for computing `cot(fovY/2)` and any sine/cosine values.
-
-## Windows API include
-
-`windows.inc` contains selected Win32/Win64 types, constants, structures, and
-prototypes for Kernel32, User32, GDI32, Advapi32, and Shell32. Set
-`WINDOWS_X64 EQU 1` before including it for a 64-bit target; otherwise it
-defaults to x86. `WINDOWS_AUTOLIB EQU 1` emits import-library directives.
+The math macros are inline assembly, not callable procedures. Most floating-point
+and vector helpers require SSE/SSE2 enabled for x86 targets. Review each include
+for register clobbers, input assumptions, destination aliasing, and empty-input
+behavior. The statistics macros accept a count in an immediate or 32-bit register;
+empty arrays return zero.
 
 ## Examples
 
-- `math_vectors.asm`
-- `transform_pipeline.asm`
-- `camera_pipeline.asm` — composes model, view, and perspective matrices and transforms a point to NDC.
-- `messagebox.asm`
-- `window.asm`
+- `math_vectors.asm` — integer/scalar math, vectors, and matrices.
+- `transform_pipeline.asm` — composing 2D and 3D transforms.
+- `camera_pipeline.asm` — composing model, view, and perspective matrices, then transforming a point to clip/NDC coordinates.
+- `messagebox.asm` and `window.asm` — Windows API examples.
+
+The examples are source illustrations. Assemble with UASM 2.57r for the intended
+target and link the appropriate Windows libraries if the program uses Win32 APIs.
