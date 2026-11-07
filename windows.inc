@@ -1,18 +1,14 @@
 ; windows.inc - compact Windows API declarations for UASM 2.57r
-; Supports 32-bit and 64-bit targets. This is a starter include, not a
-; replacement for the Windows SDK or the full WinInc package.
+; Supports 32-bit and 64-bit targets. This is a practical starter include,
+; not a replacement for the Windows SDK or the full WinInc package.
 ;
 ; Architecture selection:
 ;   x86: default
 ;   x64: define WINDOWS_X64 before including this file, or assemble with
 ;        _WIN64 already defined.
 ;
-; Example:
-;   WINDOWS_X64 EQU 1
-;   INCLUDE windows.inc
-;
-; API prototypes are declarations only; link the appropriate Windows import
-; libraries (for example kernel32.lib and user32.lib).
+; API prototypes are declarations only. Link the corresponding Windows import
+; libraries (commonly kernel32.lib and user32.lib).
 
 IFNDEF WINDOWS_INC_INCLUDED
 WINDOWS_INC_INCLUDED EQU 1
@@ -40,9 +36,6 @@ ENDIF
 ; Fundamental Windows scalar and pointer types.
 BOOL       TEXTEQU <SDWORD>
 BOOLEAN    TEXTEQU <BYTE>
-BYTE_T     TEXTEQU <BYTE>
-WORD_T     TEXTEQU <WORD>
-DWORD_T    TEXTEQU <DWORD>
 UINT       TEXTEQU <DWORD>
 INT        TEXTEQU <SDWORD>
 LONG       TEXTEQU <SDWORD>
@@ -63,6 +56,9 @@ HMENU      TEXTEQU <WIN_PTR>
 HDC        TEXTEQU <WIN_PTR>
 HBITMAP    TEXTEQU <WIN_PTR>
 HMODULE    TEXTEQU <WIN_PTR>
+HKEY       TEXTEQU <WIN_PTR>
+HGLOBAL    TEXTEQU <WIN_PTR>
+HLOCAL     TEXTEQU <WIN_PTR>
 FARPROC    TEXTEQU <WIN_PTR>
 LPVOID     TEXTEQU <WIN_PTR>
 LPCVOID    TEXTEQU <WIN_PTR>
@@ -75,12 +71,15 @@ WPARAM     TEXTEQU <WIN_UINTPTR>
 LPARAM     TEXTEQU <WIN_INTPTR>
 UINT_PTR   TEXTEQU <WIN_UINTPTR>
 INT_PTR    TEXTEQU <WIN_INTPTR>
+LONG_PTR   TEXTEQU <WIN_LONGPTR>
+ULONG_PTR  TEXTEQU <WIN_ULONGPTR>
 SIZE_T     TEXTEQU <WIN_SIZE_T>
 
 ; Common constants.
 NULL                EQU 0
 FALSE               EQU 0
 TRUE                EQU 1
+INVALID_HANDLE_VALUE EQU -1
 
 ; Window styles and messages.
 WS_OVERLAPPED       EQU 00000000h
@@ -126,6 +125,32 @@ MB_ICONINFORMATION  EQU 00000040h
 SW_HIDE             EQU 0
 SW_SHOWNORMAL       EQU 1
 SW_SHOW             EQU 5
+
+; File access, creation, and standard handle constants.
+GENERIC_READ        EQU 80000000h
+GENERIC_WRITE       EQU 40000000h
+FILE_SHARE_READ     EQU 00000001h
+FILE_SHARE_WRITE    EQU 00000002h
+CREATE_NEW          EQU 1
+CREATE_ALWAYS       EQU 2
+OPEN_EXISTING       EQU 3
+OPEN_ALWAYS         EQU 4
+TRUNCATE_EXISTING   EQU 5
+FILE_ATTRIBUTE_NORMAL EQU 00000080h
+STD_INPUT_HANDLE    EQU -10
+STD_OUTPUT_HANDLE   EQU -11
+STD_ERROR_HANDLE    EQU -12
+
+; Memory and wait constants.
+MEM_COMMIT          EQU 00001000h
+MEM_RESERVE         EQU 00002000h
+MEM_RELEASE         EQU 00008000h
+PAGE_READWRITE      EQU 00000004h
+PAGE_EXECUTE_READ   EQU 00000020h
+INFINITE            EQU 0FFFFFFFFh
+WAIT_OBJECT_0       EQU 0
+WAIT_TIMEOUT        EQU 00000102h
+WAIT_FAILED         EQU 0FFFFFFFFh
 
 ; Basic, architecture-independent structures.
 POINT STRUCT
@@ -173,6 +198,56 @@ ENDIF
     lpszClassName   LPCSTR ?
 WNDCLASSA ENDS
 
+; Process startup structures, with explicit Win64 alignment padding.
+SECURITY_ATTRIBUTES STRUCT
+    nLength             DWORD ?
+IFDEF WINDOWS_X64
+    _pad0               DWORD ?
+ENDIF
+    lpSecurityDescriptor LPVOID ?
+    bInheritHandle      BOOL ?
+IFDEF WINDOWS_X64
+    _pad1               DWORD ?
+ENDIF
+SECURITY_ATTRIBUTES ENDS
+
+STARTUPINFOA STRUCT
+    cb              DWORD ?
+IFDEF WINDOWS_X64
+    _pad0           DWORD ?
+ENDIF
+    lpReserved      LPSTR ?
+    lpDesktop       LPSTR ?
+    lpTitle         LPSTR ?
+    dwX             DWORD ?
+    dwY             DWORD ?
+    dwXSize         DWORD ?
+    dwYSize         DWORD ?
+    dwXCountChars   DWORD ?
+    dwYCountChars   DWORD ?
+    dwFillAttribute DWORD ?
+    dwFlags         DWORD ?
+    wShowWindow     WORD ?
+    cbReserved2     WORD ?
+IFDEF WINDOWS_X64
+    _pad1           DWORD ?
+ENDIF
+    lpReserved2     LPVOID ?
+    hStdInput       HANDLE ?
+    hStdOutput      HANDLE ?
+    hStdError       HANDLE ?
+STARTUPINFOA ENDS
+
+PROCESS_INFORMATION STRUCT
+    hProcess        HANDLE ?
+    hThread         HANDLE ?
+    dwProcessId     DWORD ?
+    dwThreadId      DWORD ?
+IFDEF WINDOWS_X64
+    _pad0           DWORD ?
+ENDIF
+PROCESS_INFORMATION ENDS
+
 ; WINAPI is stdcall on Win32 and the native x64 convention on Win64.
 IFNDEF WINDOWS_X64
     WINAPI TEXTEQU < STDCALL>
@@ -180,21 +255,57 @@ ELSE
     WINAPI TEXTEQU <>
 ENDIF
 
-; Selected Kernel32 and User32 APIs. Add EXTERNDEF/IMPORTLIB declarations
-; in the application or link against the corresponding import libraries.
-GetModuleHandleA PROTO WINAPI :LPCSTR
-ExitProcess      PROTO WINAPI :UINT
+; Kernel32: modules, process/thread control, memory, files, console, time.
+GetModuleHandleA       PROTO WINAPI :LPCSTR
+GetModuleHandleW       PROTO WINAPI :LPCWSTR
+LoadLibraryA           PROTO WINAPI :LPCSTR
+LoadLibraryW           PROTO WINAPI :LPCWSTR
+GetProcAddress         PROTO WINAPI :HMODULE, :LPCSTR
+FreeLibrary            PROTO WINAPI :HMODULE
+GetLastError           PROTO WINAPI
+SetLastError           PROTO WINAPI :DWORD
+ExitProcess            PROTO WINAPI :UINT
+GetCurrentProcessId    PROTO WINAPI
+GetCurrentThreadId     PROTO WINAPI
+Sleep                  PROTO WINAPI :DWORD
+GetTickCount           PROTO WINAPI
+GetTickCount64         PROTO WINAPI
 
-MessageBoxA      PROTO WINAPI :HWND, :LPCSTR, :LPCSTR, :UINT
-MessageBoxW      PROTO WINAPI :HWND, :LPCWSTR, :LPCWSTR, :UINT
-RegisterClassA   PROTO WINAPI :PTR WNDCLASSA
-CreateWindowExA  PROTO WINAPI :DWORD, :LPCSTR, :LPCSTR, :DWORD, :INT, :INT, :INT, :INT, :HWND, :HMENU, :HINSTANCE, :LPVOID
-DefWindowProcA   PROTO WINAPI :HWND, :UINT, :WPARAM, :LPARAM
-ShowWindow       PROTO WINAPI :HWND, :INT
-UpdateWindow     PROTO WINAPI :HWND
-GetMessageA      PROTO WINAPI :PTR MSG, :HWND, :UINT, :UINT
-TranslateMessage PROTO WINAPI :PTR MSG
-DispatchMessageA PROTO WINAPI :PTR MSG
-PostQuitMessage  PROTO WINAPI :INT
+VirtualAlloc           PROTO WINAPI :LPVOID, :SIZE_T, :DWORD, :DWORD
+VirtualFree            PROTO WINAPI :LPVOID, :SIZE_T, :DWORD
+HeapAlloc              PROTO WINAPI :HANDLE, :DWORD, :SIZE_T
+HeapFree               PROTO WINAPI :HANDLE, :DWORD, :LPVOID
+GetProcessHeap         PROTO WINAPI
+
+CreateFileA            PROTO WINAPI :LPCSTR, :DWORD, :DWORD, :PTR SECURITY_ATTRIBUTES, :DWORD, :DWORD, :HANDLE
+CreateFileW            PROTO WINAPI :LPCWSTR, :DWORD, :DWORD, :PTR SECURITY_ATTRIBUTES, :DWORD, :DWORD, :HANDLE
+ReadFile               PROTO WINAPI :HANDLE, :LPVOID, :DWORD, :LPVOID, :LPVOID
+WriteFile              PROTO WINAPI :HANDLE, :LPCVOID, :DWORD, :LPVOID, :LPVOID
+CloseHandle            PROTO WINAPI :HANDLE
+GetFileSize            PROTO WINAPI :HANDLE, :LPVOID
+DeleteFileA            PROTO WINAPI :LPCSTR
+DeleteFileW            PROTO WINAPI :LPCWSTR
+
+GetStdHandle           PROTO WINAPI :DWORD
+WriteConsoleA          PROTO WINAPI :HANDLE, :LPCVOID, :DWORD, :LPVOID, :LPVOID
+WriteConsoleW          PROTO WINAPI :HANDLE, :LPCVOID, :DWORD, :LPVOID, :LPVOID
+
+CreateProcessA         PROTO WINAPI :LPCSTR, :LPSTR, :PTR SECURITY_ATTRIBUTES, :PTR SECURITY_ATTRIBUTES, :BOOL, :DWORD, :LPVOID, :LPCSTR, :PTR STARTUPINFOA, :PTR PROCESS_INFORMATION
+CreateProcessW         PROTO WINAPI :LPCWSTR, :LPWSTR, :PTR SECURITY_ATTRIBUTES, :PTR SECURITY_ATTRIBUTES, :BOOL, :DWORD, :LPVOID, :LPCWSTR, :PTR STARTUPINFOA, :PTR PROCESS_INFORMATION
+WaitForSingleObject    PROTO WINAPI :HANDLE, :DWORD
+TerminateProcess       PROTO WINAPI :HANDLE, :UINT
+
+; User32: message boxes, windows, and message loop.
+MessageBoxA            PROTO WINAPI :HWND, :LPCSTR, :LPCSTR, :UINT
+MessageBoxW            PROTO WINAPI :HWND, :LPCWSTR, :LPCWSTR, :UINT
+RegisterClassA         PROTO WINAPI :PTR WNDCLASSA
+CreateWindowExA        PROTO WINAPI :DWORD, :LPCSTR, :LPCSTR, :DWORD, :INT, :INT, :INT, :INT, :HWND, :HMENU, :HINSTANCE, :LPVOID
+DefWindowProcA         PROTO WINAPI :HWND, :UINT, :WPARAM, :LPARAM
+ShowWindow             PROTO WINAPI :HWND, :INT
+UpdateWindow           PROTO WINAPI :HWND
+GetMessageA            PROTO WINAPI :PTR MSG, :HWND, :UINT, :UINT
+TranslateMessage       PROTO WINAPI :PTR MSG
+DispatchMessageA       PROTO WINAPI :PTR MSG
+PostQuitMessage        PROTO WINAPI :INT
 
 ENDIF ; WINDOWS_INC_INCLUDED
