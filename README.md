@@ -1,38 +1,39 @@
-# UASM 2.57r Headers
+# UASM-2.57r-Headers.
 
-Compact, modular MASM-style include files and examples for UASM 2.57r.
+Headers for UASM 2.57r assembler.
 
-## Math and geometry modules
+## Included modules
 
-- `math.inc` — inline signed 32-bit integer and basic scalar `REAL4` helpers.
-- `float.inc` — scalar `REAL4` arithmetic, min/max, abs/neg, lerp, conversions, comparison, and x87 sine/cosine macros.
-- `vector.inc` — `VEC2`/`VEC3` layouts and common SSE vector operations.
-- `matrix.inc` — row-major `MAT4`, identity/zero initialization, and 4x4 multiplication.
-- `transform.inc` — 2D `MAT3` and 3D `MAT4` constructors, composition, point/vector transforms, and homogeneous projection.
+- `windows.inc` — compact Win32/Win64 declarations, structures, and APIs.
+- `math.inc` — integer arithmetic and scalar REAL4 helpers.
+- `float.inc` — scalar REAL4 arithmetic, clamp, compare, lerp, conversion, sine, and cosine macros.
+- `vector.inc` — `VEC2` and `VEC3` layouts plus common SSE vector operations.
+- `matrix.inc` — row-major 4x4 matrix helpers and matrix multiplication.
+- `transform.inc` — 2D affine and 3D homogeneous transform macros.
+- `statistics.inc` — mean, variance, stddev, min/max, and interpolation helpers.
+- `complex.inc` — complex-number arithmetic and magnitude macros.
 
-The modules are inline macros (no runtime library required). SSE helpers require
-SSE enabled for x86; SSE2 is guaranteed on Windows x64. `float.inc` sine/cosine
-use x87 `FSIN`/`FCOS`; reduce large angles and check the x87 C2 status if range
-handling matters. Matrix multiplication uses x87 and leaves the control word
-unchanged. Transform matrices are row-major and multiply column vectors; matrix
-composition order therefore follows `result = lhs * rhs`.
+## Design goals
 
-Transform constructors take sine/cosine values from the caller rather than
-silently approximating trigonometry. Review each include's comments for operand
-forms, register clobbers, alignment, aliasing, and in-place operation rules.
+The library is intentionally modular:
 
-## Windows API include
+- small files with focused responsibilities
+- macros that map directly to instructions
+- no hidden runtime dependencies
+- straightforward extension for scientific, numerical, and graphics work
 
-`windows.inc` contains selected types, constants, structures, and prototypes for
-Kernel32, User32, GDI32, Advapi32, and Shell32. Set `WINDOWS_X64 EQU 1` before
-including it for a 64-bit target; otherwise it defaults to x86. Set
-`WINDOWS_AUTOLIB EQU 1` to emit import-library directives, or add only the
-`INCLUDELIB` directives your program needs.
+## Notes
 
-## Examples
+- SSE is required for all vector/REAL4 macros on x86 targets.
+- Windows x64 already has SSE2 and is the recommended path for floating-point work.
+- Trig helpers are direct asm macros; use caller-side angle reduction when needed.
+- Matrix conventions are documented in each file, especially the row-major and column-vector behavior.
 
-- `math_vectors.asm` demonstrates integer/scalar math, vectors, and matrices.
-- `transform_pipeline.asm` demonstrates scalar float operations and 2D/3D transforms.
+## Example programs
 
-These examples are source illustrations; assemble with UASM 2.57r for the target
-architecture and link the appropriate Windows libraries when using Windows APIs.
+- `messagebox.asm`
+- `window.asm`
+- `math_vectors.asm`
+- `transform_pipeline.asm`
+
+These files illustrate the progression from basic Windows calls to scientific and graphics-style math use.
