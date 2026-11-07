@@ -1,7 +1,8 @@
-; matrix.inc - 4x4 single-precision matrix layout and basic helpers
-; Matrices are row-major: element (row, column) is at row*16 + column*4.
-; Matrix routines use unaligned memory accesses and do not require alignment.
-; Include this in a source that supports SSE; the macros clobber XMM0.
+; matrix.inc - row-major 4x4 single-precision matrix helpers
+; Elements use row*16 + column*4 byte offsets. Matrix operations use x87
+; scalar arithmetic and unaligned data; no alignment is required.
+; MAT4_MUL computes dst = lhs * rhs. dst must not overlap either input.
+; The x87 stack is balanced; the control word is unchanged.
 
 IFNDEF UASM_MATRIX_INC_INCLUDED
 UASM_MATRIX_INC_INCLUDED EQU 1
@@ -25,72 +26,65 @@ MAT4 STRUCT
     m33 REAL4 ?
 MAT4 ENDS
 
-; dst is a base register pointing to writable 64-byte MAT4 storage.
 MAT4_ZERO MACRO dst
-    xor eax, eax
-    mov DWORD PTR [dst+0], eax
-    mov DWORD PTR [dst+4], eax
-    mov DWORD PTR [dst+8], eax
-    mov DWORD PTR [dst+12], eax
-    mov DWORD PTR [dst+16], eax
-    mov DWORD PTR [dst+20], eax
-    mov DWORD PTR [dst+24], eax
-    mov DWORD PTR [dst+28], eax
-    mov DWORD PTR [dst+32], eax
-    mov DWORD PTR [dst+36], eax
-    mov DWORD PTR [dst+40], eax
-    mov DWORD PTR [dst+44], eax
-    mov DWORD PTR [dst+48], eax
-    mov DWORD PTR [dst+52], eax
-    mov DWORD PTR [dst+56], eax
-    mov DWORD PTR [dst+60], eax
-ENDM
-
-MAT4_IDENTITY MACRO dst
-    mov DWORD PTR [dst+0], 03F800000h
+    mov DWORD PTR [dst+0], 0
     mov DWORD PTR [dst+4], 0
     mov DWORD PTR [dst+8], 0
     mov DWORD PTR [dst+12], 0
     mov DWORD PTR [dst+16], 0
-    mov DWORD PTR [dst+20], 03F800000h
+    mov DWORD PTR [dst+20], 0
     mov DWORD PTR [dst+24], 0
     mov DWORD PTR [dst+28], 0
     mov DWORD PTR [dst+32], 0
     mov DWORD PTR [dst+36], 0
-    mov DWORD PTR [dst+40], 03F800000h
+    mov DWORD PTR [dst+40], 0
     mov DWORD PTR [dst+44], 0
     mov DWORD PTR [dst+48], 0
     mov DWORD PTR [dst+52], 0
     mov DWORD PTR [dst+56], 0
+    mov DWORD PTR [dst+60], 0
+ENDM
+
+MAT4_IDENTITY MACRO dst
+    MAT4_ZERO dst
+    mov DWORD PTR [dst+0], 03F800000h
+    mov DWORD PTR [dst+20], 03F800000h
+    mov DWORD PTR [dst+40], 03F800000h
     mov DWORD PTR [dst+60], 03F800000h
 ENDM
 
-; Store a 4x4 matrix product into dst using the scalar x87 FPU.
-; Arguments are base registers. dst must not overlap lhs or rhs. This macro
-; emits a fully unrolled multiply and does not change the x87 control word.
+MAT4_MUL_CELL MACRO dst, lhs, rhs, outOff, rowOff, colOff
+    fld DWORD PTR [lhs+rowOff+0]
+    fmul DWORD PTR [rhs+colOff+0]
+    fld DWORD PTR [lhs+rowOff+4]
+    fmul DWORD PTR [rhs+colOff+16]
+    faddp st(1), st(0)
+    fld DWORD PTR [lhs+rowOff+8]
+    fmul DWORD PTR [rhs+colOff+32]
+    faddp st(1), st(0)
+    fld DWORD PTR [lhs+rowOff+12]
+    fmul DWORD PTR [rhs+colOff+48]
+    faddp st(1), st(0)
+    fstp DWORD PTR [dst+outOff]
+ENDM
+
 MAT4_MUL MACRO dst, lhs, rhs
-    LOCAL row, col
-    ; Expand one dot product per output cell; EAX/ECX are scratch registers.
-    mov eax, 0
-    REPT 4
-        mov ecx, 0
-        REPT 4
-            fld DWORD PTR [lhs+eax+0]
-            fmul DWORD PTR [rhs+ecx+0]
-            fld DWORD PTR [lhs+eax+4]
-            fmul DWORD PTR [rhs+ecx+16]
-            faddp st(1), st(0)
-            fld DWORD PTR [lhs+eax+8]
-            fmul DWORD PTR [rhs+ecx+32]
-            faddp st(1), st(0)
-            fld DWORD PTR [lhs+eax+12]
-            fmul DWORD PTR [rhs+ecx+48]
-            faddp st(1), st(0)
-            fstp DWORD PTR [dst+eax+ecx*4]
-            add ecx, 1
-        ENDM
-        add eax, 16
-    ENDM
+    MAT4_MUL_CELL dst, lhs, rhs, 0, 0, 0
+    MAT4_MUL_CELL dst, lhs, rhs, 4, 0, 4
+    MAT4_MUL_CELL dst, lhs, rhs, 8, 0, 8
+    MAT4_MUL_CELL dst, lhs, rhs, 12, 0, 12
+    MAT4_MUL_CELL dst, lhs, rhs, 16, 16, 0
+    MAT4_MUL_CELL dst, lhs, rhs, 20, 16, 4
+    MAT4_MUL_CELL dst, lhs, rhs, 24, 16, 8
+    MAT4_MUL_CELL dst, lhs, rhs, 28, 16, 12
+    MAT4_MUL_CELL dst, lhs, rhs, 32, 32, 0
+    MAT4_MUL_CELL dst, lhs, rhs, 36, 32, 4
+    MAT4_MUL_CELL dst, lhs, rhs, 40, 32, 8
+    MAT4_MUL_CELL dst, lhs, rhs, 44, 32, 12
+    MAT4_MUL_CELL dst, lhs, rhs, 48, 48, 0
+    MAT4_MUL_CELL dst, lhs, rhs, 52, 48, 4
+    MAT4_MUL_CELL dst, lhs, rhs, 56, 48, 8
+    MAT4_MUL_CELL dst, lhs, rhs, 60, 48, 12
 ENDM
 
 ENDIF ; UASM_MATRIX_INC_INCLUDED

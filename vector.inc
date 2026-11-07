@@ -1,12 +1,9 @@
 ; vector.inc - 2D/3D single-precision vector layout and inline helpers
-; UASM 2.57r, MASM-style syntax. Include math.inc if scalar helpers are needed.
-;
-; Vec2 is exactly two REAL4 values (8 bytes).
-; Vec3 has a fourth padding float (16 bytes), allowing safe 128-bit loads.
-; The helpers use SSE and clobber XMM0-XMM3 as noted. Vector pointers are
-; passed as base registers (for example ESI/EDI in x86 or RSI/RDI in x64).
-; VEC2_ADD/ SUB/ SCALE use XMM0. VEC3_ADD/SUB/SCALE use XMM0.
-; Dot products return their scalar result in XMM0. Inputs are unchanged.
+; UASM 2.57r MASM-style syntax. Uses SSE; enable it for x86 builds.
+; VEC2 is 8 bytes; VEC3 is 16 bytes with a padding lane.
+; Pass base registers for vector pointers. Dot/length-squared results are in XMM0.
+; Arithmetic macros clobber XMM0-XMM1. Inputs are unchanged; dst may alias an
+; input for add/sub/scale.
 
 IFNDEF UASM_VECTOR_INC_INCLUDED
 UASM_VECTOR_INC_INCLUDED EQU 1
@@ -23,7 +20,6 @@ VEC3 STRUCT
     _pad  REAL4 ?
 VEC3 ENDS
 
-; dst, lhs, rhs are base registers pointing to VEC2 values.
 VEC2_ADD MACRO dst, lhs, rhs
     movlps xmm0, QWORD PTR [lhs]
     movlps xmm1, QWORD PTR [rhs]
@@ -40,24 +36,20 @@ ENDM
 
 VEC2_SCALE MACRO dst, src, scalarMem
     movlps xmm0, QWORD PTR [src]
-    shufps xmm1, xmm0, 0
     movss xmm1, scalarMem
     shufps xmm1, xmm1, 0
     mulps xmm0, xmm1
     movlps QWORD PTR [dst], xmm0
 ENDM
 
-; Returns x*x + y*y in the low lane of XMM0.
 VEC2_DOT MACRO lhs, rhs
-    movlps xmm0, QWORD PTR [lhs]
-    movlps xmm1, QWORD PTR [rhs]
-    mulps xmm0, xmm1
-    movaps xmm1, xmm0
-    shufps xmm1, xmm1, 0B1h
+    movss xmm0, DWORD PTR [lhs+0]
+    mulss xmm0, DWORD PTR [rhs+0]
+    movss xmm1, DWORD PTR [lhs+4]
+    mulss xmm1, DWORD PTR [rhs+4]
     addss xmm0, xmm1
 ENDM
 
-; dst/lhs/rhs are base registers pointing to 16-byte VEC3 values.
 VEC3_ADD MACRO dst, lhs, rhs
     movups xmm0, XMMWORD PTR [lhs]
     movups xmm1, XMMWORD PTR [rhs]
@@ -80,36 +72,33 @@ VEC3_SCALE MACRO dst, src, scalarMem
     movups XMMWORD PTR [dst], xmm0
 ENDM
 
-; Returns x*x + y*y + z*z in the low lane of XMM0.
 VEC3_DOT MACRO lhs, rhs
-    movups xmm0, XMMWORD PTR [lhs]
-    movups xmm1, XMMWORD PTR [rhs]
-    mulps xmm0, xmm1
-    movaps xmm1, xmm0
-    shufps xmm1, xmm1, 4Eh
+    movss xmm0, DWORD PTR [lhs+0]
+    mulss xmm0, DWORD PTR [rhs+0]
+    movss xmm1, DWORD PTR [lhs+4]
+    mulss xmm1, DWORD PTR [rhs+4]
     addss xmm0, xmm1
-    movaps xmm1, xmm0
-    shufps xmm1, xmm1, 0B1h
+    movss xmm1, DWORD PTR [lhs+8]
+    mulss xmm1, DWORD PTR [rhs+8]
     addss xmm0, xmm1
 ENDM
 
-; VEC2/VEC3 length squared helpers leave the result in XMM0.
 VEC2_LENGTH_SQ MACRO src
-    movlps xmm0, QWORD PTR [src]
-    mulps xmm0, xmm0
-    movaps xmm1, xmm0
-    shufps xmm1, xmm1, 0B1h
+    movss xmm0, DWORD PTR [src+0]
+    mulss xmm0, xmm0
+    movss xmm1, DWORD PTR [src+4]
+    mulss xmm1, xmm1
     addss xmm0, xmm1
 ENDM
 
 VEC3_LENGTH_SQ MACRO src
-    movups xmm0, XMMWORD PTR [src]
-    mulps xmm0, xmm0
-    movaps xmm1, xmm0
-    shufps xmm1, xmm1, 4Eh
+    movss xmm0, DWORD PTR [src+0]
+    mulss xmm0, xmm0
+    movss xmm1, DWORD PTR [src+4]
+    mulss xmm1, xmm1
     addss xmm0, xmm1
-    movaps xmm1, xmm0
-    shufps xmm1, xmm1, 0B1h
+    movss xmm1, DWORD PTR [src+8]
+    mulss xmm1, xmm1
     addss xmm0, xmm1
 ENDM
 
